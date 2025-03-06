@@ -11,6 +11,7 @@
         th, td { border: 1px solid black; padding: 8px; text-align: center; }
         th { background-color: #f4f4f4; }
         button { margin-top: 10px; padding: 10px; font-size: 16px; cursor: pointer; }
+        #notifications { font-size: 16px; color: red; font-weight: bold; margin-top: 10px; }
     </style>
 </head>
 <body>
@@ -18,7 +19,8 @@
     <p id="status">🔄 Buscando tokens...</p>
     <button onclick="clearHistory()">🗑️ Limpar Histórico</button>
 
-    <h2>📜 Tokens que Atingiram 10% de Alta</h2>
+    <h2>📜 Tokens que Atingiram 9% e 10% de Alta</h2>
+    <p id="notifications"></p>
     <table id="historyTable">
         <thead>
             <tr>
@@ -28,7 +30,7 @@
                 <th>Valor Atual</th>
                 <th>Variação (%)</th>
                 <th>Horário</th>
-                <th>Status 12%</th>
+                <th>Status</th>
             </tr>
         </thead>
         <tbody id="history"></tbody>
@@ -46,6 +48,9 @@
             if ("Notification" in window) {
                 Notification.requestPermission().then(permission => {
                     console.log("Permissão de notificação:", permission);
+                    if (permission !== "granted") {
+                        document.getElementById("notifications").textContent = "⚠️ Ative as notificações no navegador!";
+                    }
                 });
             }
         });
@@ -74,8 +79,8 @@
             socket.onmessage = function(event) {
                 let data = JSON.parse(event.data);
                 let token = data.s;
-                let openPrice = parseFloat(data.k.o); // Garante o preço correto de abertura
-                let currentPrice = parseFloat(data.k.c); // Garante o preço correto atual
+                let openPrice = parseFloat(data.k.o); // Preço de abertura correto
+                let currentPrice = parseFloat(data.k.c); // Preço atual correto
                 let percentageChange = ((currentPrice - openPrice) / openPrice) * 100;
                 let now = new Date();
                 let timeString = now.toLocaleTimeString();
@@ -90,46 +95,58 @@
                 }
 
                 if (!tokenData[token]) {
-                    tokenData[token] = { open: openPrice, alerted10: false, alerted12: false, status: "🔄 Aguardando" };
+                    tokenData[token] = { open: openPrice, alerted9: false, alerted10: false, status: "🔄 Aguardando" };
                 }
 
-                // Enviar notificação ao atingir 10%
+                // Notificar ao atingir 9%
+                if (!tokenData[token].alerted9 && percentageChange >= 9) {
+                    tokenData[token].alerted9 = true;
+                    sendNotification(token, 9);
+                    tokenData[token].status = "⚠️ Aguardando 10%";
+                    updateHistory(token, openPrice, currentPrice, percentageChange, timeString, "⚠️ Aguardando 10%");
+                }
+
+                // Notificar ao atingir 10%
                 if (!tokenData[token].alerted10 && percentageChange >= 10) {
                     alertCounter++;
                     tokenData[token].alerted10 = true;
                     sendNotification(token, 10);
                     tokenData[token].status = "🔄 Aguardando 12%";
-
-                    alertHistory.push({
-                        id: alertCounter,
-                        token,
-                        openPrice,
-                        currentPrice,
-                        percentageChange,
-                        time: timeString,
-                        status: "🔄 Aguardando 12%"
-                    });
-
-                    updateHistoryTable();
+                    updateHistory(token, openPrice, currentPrice, percentageChange, timeString, "🔄 Aguardando 12%");
                 }
 
-                // Verificar se atingiu 12% sem cair para o preço de abertura
-                if (tokenData[token].alerted10 && !tokenData[token].alerted12) {
-                    if (percentageChange >= 12) {
-                        tokenData[token].alerted12 = true;
-                        tokenData[token].status = "✅ Sucesso";
-                        updateHistoryTable();
-                    } else if (currentPrice <= openPrice) {
-                        tokenData[token].status = "❌ Não manteve valorização";
-                        updateHistoryTable();
-                    }
+                // Verificar se atingiu 12%
+                if (tokenData[token].alerted10 && percentageChange >= 12) {
+                    tokenData[token].status = "✅ Sucesso";
+                    updateHistoryTable();
                 }
             };
         }
 
+        function updateHistory(token, openPrice, currentPrice, percentageChange, timeString, status) {
+            let existingEntry = alertHistory.find(entry => entry.token === token);
+            if (existingEntry) {
+                existingEntry.currentPrice = currentPrice;
+                existingEntry.percentageChange = percentageChange;
+                existingEntry.time = timeString;
+                existingEntry.status = status;
+            } else {
+                alertCounter++;
+                alertHistory.push({
+                    id: alertCounter,
+                    token,
+                    openPrice,
+                    currentPrice,
+                    percentageChange,
+                    time: timeString,
+                    status
+                });
+            }
+            updateHistoryTable();
+        }
+
         function updateHistoryTable() {
             document.getElementById("history").innerHTML = alertHistory.map(entry => {
-                let tokenStatus = tokenData[entry.token] ? tokenData[entry.token].status : "🔄 Aguardando";
                 return `<tr>
                     <td>${entry.id}</td>
                     <td>${entry.token}</td>
@@ -137,14 +154,20 @@
                     <td>$${entry.currentPrice.toFixed(4)}</td>
                     <td>${entry.percentageChange.toFixed(2)}%</td>
                     <td>${entry.time}</td>
-                    <td>${tokenStatus}</td>
+                    <td>${entry.status}</td>
                 </tr>`;
             }).join("");
         }
 
         function sendNotification(token, percentage) {
+            let message = `🚨 ${token} atingiu +${percentage}%!`;
+            console.log(message);
+
             if ("Notification" in window && Notification.permission === "granted") {
-                new Notification(`🚨 ${token} atingiu +${percentage}%!`);
+                new Notification(message);
+                document.getElementById("notifications").textContent = `🚀 Alerta: ${message}`;
+            } else {
+                alert(message); // Fallback para navegadores sem suporte
             }
         }
 
